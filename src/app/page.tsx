@@ -13,6 +13,10 @@ import {
   Square,
   Calendar,
   Timer,
+  Edit3,
+  Plus,
+  X,
+  Save,
 } from 'lucide-react';
 import {
   calculateJornadaResumo,
@@ -20,6 +24,7 @@ import {
   formatMinutesShort,
   formatTimeBR,
   getBreakMs,
+  getTodayDateString,
   getWorkedMs,
 } from '@/lib/ponto-calc';
 import type { PontoAcao, RegistroDia, UserConfig, UserRecord } from '@/types/ponto';
@@ -41,6 +46,14 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [editingReg, setEditingReg] = useState<{
+    data: string;
+    entrada: string;
+    saida_intervalo: string;
+    retorno_intervalo: string;
+    saida_final: string;
+    observacao: string;
+  } | null>(null);
 
   const loadData = useCallback(async () => {
     try {
@@ -104,6 +117,51 @@ export default function DashboardPage() {
     await fetch('/api/auth/logout', { method: 'POST' });
     router.push('/login');
     router.refresh();
+  }
+
+  function isoToLocalHHMM(iso: string | null | undefined): string {
+    if (!iso) return '';
+    return new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'America/Sao_Paulo',
+      hour: '2-digit',
+      minute: '2-digit',
+    }).format(new Date(iso));
+  }
+
+  function openEditModal(reg: RegistroDia | null, fallbackDate?: string) {
+    setEditingReg({
+      data: reg?.data ?? fallbackDate ?? getTodayDateString(),
+      entrada: isoToLocalHHMM(reg?.entrada),
+      saida_intervalo: isoToLocalHHMM(reg?.saida_intervalo),
+      retorno_intervalo: isoToLocalHHMM(reg?.retorno_intervalo),
+      saida_final: isoToLocalHHMM(reg?.saida_final),
+      observacao: reg?.observacao ?? '',
+    });
+  }
+
+  async function handleSaveManual(e: React.FormEvent) {
+    e.preventDefault();
+    if (!editingReg) return;
+    setError(null);
+    setActionLoading(true);
+    try {
+      const res = await fetch('/api/ponto', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(editingReg),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || 'Erro ao salvar horários.');
+        return;
+      }
+      setEditingReg(null);
+      await loadData();
+    } catch {
+      setError('Erro de conexão ao salvar horários.');
+    } finally {
+      setActionLoading(false);
+    }
   }
 
   if (loading || !config || !user) {
@@ -285,10 +343,19 @@ export default function DashboardPage() {
 
           {/* Batidas de Hoje */}
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6">
-            <h2 className="text-sm font-semibold text-slate-200 mb-4 flex items-center gap-2">
-              <Calendar className="w-4 h-4 text-indigo-400" />
-              Registros de Hoje
-            </h2>
+            <div className="flex items-center justify-between gap-2 mb-4">
+              <h2 className="text-sm font-semibold text-slate-200 flex items-center gap-2">
+                <Calendar className="w-4 h-4 text-indigo-400" />
+                Registros de Hoje
+              </h2>
+              <button
+                onClick={() => openEditModal(hoje)}
+                className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs text-slate-200 flex items-center gap-1.5 transition cursor-pointer"
+              >
+                <Edit3 className="w-3.5 h-3.5" />
+                Editar
+              </button>
+            </div>
 
             <div className="space-y-3 text-sm">
               <div className="flex items-center justify-between p-3 rounded-xl bg-slate-950/70 border border-slate-800/80">
@@ -326,7 +393,16 @@ export default function DashboardPage() {
 
         {/* Histórico Pessoal */}
         <section className="bg-slate-900 border border-slate-800 rounded-2xl p-6">
-          <h2 className="text-sm font-semibold text-slate-200 mb-4">Histórico Recente (30 dias)</h2>
+          <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+            <h2 className="text-sm font-semibold text-slate-200">Histórico Recente (30 dias)</h2>
+            <button
+              onClick={() => openEditModal(null)}
+              className="px-3 py-1.5 rounded-xl bg-indigo-600/20 hover:bg-indigo-600/30 border border-indigo-500/30 text-indigo-300 text-xs font-medium flex items-center gap-1.5 transition cursor-pointer"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              Lançar ponto manual
+            </button>
+          </div>
           {historico.length === 0 ? (
             <p className="text-sm text-slate-500">Nenhum registro encontrado ainda.</p>
           ) : (
@@ -340,7 +416,8 @@ export default function DashboardPage() {
                     <th className="py-2.5 px-3">Retorno Int.</th>
                     <th className="py-2.5 px-3">Saída</th>
                     <th className="py-2.5 px-3">Trabalhado</th>
-                    <th className="py-2.5 pl-3 text-right">Saldo</th>
+                    <th className="py-2.5 px-3 text-right">Saldo</th>
+                    <th className="py-2.5 pl-3 text-right">Ação</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800/60">
@@ -360,7 +437,7 @@ export default function DashboardPage() {
                         <td className="py-3 px-3 font-mono text-slate-200">
                           {formatMinutesShort(workedMin)}
                         </td>
-                        <td className="py-3 pl-3 text-right font-mono">
+                        <td className="py-3 px-3 text-right font-mono">
                           {saldoMin === null ? (
                             <span className="text-slate-500">--</span>
                           ) : (
@@ -369,6 +446,14 @@ export default function DashboardPage() {
                               {formatMinutesShort(saldoMin)}
                             </span>
                           )}
+                        </td>
+                        <td className="py-3 pl-3 text-right">
+                          <button
+                            onClick={() => openEditModal(reg)}
+                            className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs text-slate-200 cursor-pointer"
+                          >
+                            Editar
+                          </button>
                         </td>
                       </tr>
                     );
@@ -379,6 +464,100 @@ export default function DashboardPage() {
           )}
         </section>
       </main>
+
+      {editingReg && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <form
+            onSubmit={handleSaveManual}
+            className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-4"
+          >
+            <div className="flex items-center justify-between">
+              <h3 className="font-bold text-base">Inserir / Editar Ponto</h3>
+              <button
+                type="button"
+                onClick={() => setEditingReg(null)}
+                className="text-slate-400 hover:text-slate-200 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">Data</label>
+              <input
+                type="date"
+                required
+                value={editingReg.data}
+                onChange={(e) => setEditingReg({ ...editingReg, data: e.target.value })}
+                className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-sm"
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">Entrada</label>
+                <input
+                  type="time"
+                  value={editingReg.entrada}
+                  onChange={(e) => setEditingReg({ ...editingReg, entrada: e.target.value })}
+                  className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">Saída Almoço/Janta</label>
+                <input
+                  type="time"
+                  value={editingReg.saida_intervalo}
+                  onChange={(e) =>
+                    setEditingReg({ ...editingReg, saida_intervalo: e.target.value })
+                  }
+                  className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">Retorno Intervalo</label>
+                <input
+                  type="time"
+                  value={editingReg.retorno_intervalo}
+                  onChange={(e) =>
+                    setEditingReg({ ...editingReg, retorno_intervalo: e.target.value })
+                  }
+                  className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">Saída Final</label>
+                <input
+                  type="time"
+                  value={editingReg.saida_final}
+                  onChange={(e) => setEditingReg({ ...editingReg, saida_final: e.target.value })}
+                  className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-sm"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">Observação (opcional)</label>
+              <input
+                type="text"
+                placeholder="Ex: esqueci de bater na hora"
+                value={editingReg.observacao}
+                onChange={(e) => setEditingReg({ ...editingReg, observacao: e.target.value })}
+                className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-sm"
+              />
+            </div>
+
+            <button
+              type="submit"
+              disabled={actionLoading}
+              className="w-full py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 font-semibold text-sm flex items-center justify-center gap-2 cursor-pointer"
+            >
+              <Save className="w-4 h-4" />
+              {actionLoading ? 'Salvando...' : 'Salvar Horários'}
+            </button>
+          </form>
+        </div>
+      )}
     </div>
   );
 }

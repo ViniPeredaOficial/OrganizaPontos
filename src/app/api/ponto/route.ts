@@ -118,3 +118,45 @@ export async function POST(req: NextRequest) {
   if (updError) return jsonError(updError.message, 500);
   return NextResponse.json({ registro: updated });
 }
+
+function normalizeTimeInput(dateStr: string, value: unknown): string | null {
+  if (typeof value !== 'string' || !value.trim()) return null;
+  const trimmed = value.trim();
+  if (/^\d{2}:\d{2}$/.test(trimmed)) {
+    return `${dateStr}T${trimmed}:00-03:00`;
+  }
+  return trimmed;
+}
+
+export async function PATCH(req: NextRequest) {
+  const { session, error } = await requireAuth();
+  if (error) return error;
+
+  const body = await req.json().catch(() => null);
+  const data = String(body?.data || '');
+
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(data)) {
+    return jsonError('Data inválida. Use o formato YYYY-MM-DD.');
+  }
+
+  const payload = {
+    user_id: session.userId,
+    data,
+    entrada: normalizeTimeInput(data, body?.entrada),
+    saida_intervalo: normalizeTimeInput(data, body?.saida_intervalo),
+    retorno_intervalo: normalizeTimeInput(data, body?.retorno_intervalo),
+    saida_final: normalizeTimeInput(data, body?.saida_final),
+    observacao: body?.observacao ? String(body.observacao).trim() : null,
+    updated_at: new Date().toISOString(),
+  };
+
+  const supabase = getSupabaseAdmin();
+  const { data: saved, error: saveErr } = await supabase
+    .from('registros_dia')
+    .upsert(payload, { onConflict: 'user_id,data' })
+    .select()
+    .single();
+
+  if (saveErr) return jsonError(saveErr.message, 500);
+  return NextResponse.json({ registro: saved });
+}
